@@ -1128,6 +1128,10 @@ settingsContainer.addEventListener('touchstart', (e) => {
     isInteractingWithGUI = true; 
     e.stopPropagation(); 
 }, { passive: false });
+settingsContainer.addEventListener('touchmove', (e) => { 
+    // Allow default touch behavior (scrolling, slider dragging) within settings
+    e.stopPropagation(); 
+}, { passive: true });
 settingsContainer.addEventListener('touchend', () => { isInteractingWithGUI = false; });
 settingsContainer.addEventListener('touchcancel', () => { isInteractingWithGUI = false; });
 
