@@ -83,6 +83,222 @@ let currentShape = 'cylinder';
 let historyStack = [];
 const MAX_HISTORY = 20;
 
+// --- ASMR Sound System ---
+let audioContext = null;
+let isSoundEnabled = false;
+let lastSoundTime = 0;
+const SOUND_COOLDOWN = 50; // ms between sounds
+
+function initAudio() {
+    if (audioContext) return;
+    audioContext = new (window.AudioContext || window.webkitAudioContext)();
+}
+
+// Create a squishy clay sound
+function playSquishSound(intensity = 0.5) {
+    if (!isSoundEnabled || !audioContext) return;
+    
+    const now = Date.now();
+    if (now - lastSoundTime < SOUND_COOLDOWN) return;
+    lastSoundTime = now;
+    
+    const time = audioContext.currentTime;
+    
+    // Create noise buffer for squelchy texture
+    const bufferSize = audioContext.sampleRate * 0.15;
+    const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    
+    for (let i = 0; i < bufferSize; i++) {
+        // Brown noise (more bass, less harsh)
+        noiseData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (bufferSize * 0.3));
+    }
+    
+    const noiseSource = audioContext.createBufferSource();
+    noiseSource.buffer = noiseBuffer;
+    
+    // Low-pass filter for muffled, wet sound
+    const lowpass = audioContext.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.setValueAtTime(800 + Math.random() * 400, time);
+    lowpass.frequency.exponentialRampToValueAtTime(200, time + 0.1);
+    lowpass.Q.value = 2;
+    
+    // Bandpass for body
+    const bandpass = audioContext.createBiquadFilter();
+    bandpass.type = 'bandpass';
+    bandpass.frequency.value = 300 + Math.random() * 200;
+    bandpass.Q.value = 1;
+    
+    // Gain envelope
+    const gainNode = audioContext.createGain();
+    const volume = 0.15 * intensity;
+    gainNode.gain.setValueAtTime(0, time);
+    gainNode.gain.linearRampToValueAtTime(volume, time + 0.02);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.12);
+    
+    // Connect: noise -> lowpass -> bandpass -> gain -> output
+    noiseSource.connect(lowpass);
+    lowpass.connect(bandpass);
+    bandpass.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    noiseSource.start(time);
+    noiseSource.stop(time + 0.15);
+    
+    // Add a subtle pop/thud for impact
+    if (Math.random() > 0.5) {
+        const osc = audioContext.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(150 + Math.random() * 50, time);
+        osc.frequency.exponentialRampToValueAtTime(50, time + 0.08);
+        
+        const oscGain = audioContext.createGain();
+        oscGain.gain.setValueAtTime(0.08 * intensity, time);
+        oscGain.gain.exponentialRampToValueAtTime(0.001, time + 0.08);
+        
+        osc.connect(oscGain);
+        oscGain.connect(audioContext.destination);
+        
+        osc.start(time);
+        osc.stop(time + 0.1);
+    }
+}
+
+// Create a stretchy/pulling sound for jelly
+function playStretchSound(intensity = 0.5) {
+    if (!isSoundEnabled || !audioContext) return;
+    
+    const now = Date.now();
+    if (now - lastSoundTime < SOUND_COOLDOWN) return;
+    lastSoundTime = now;
+    
+    const time = audioContext.currentTime;
+    
+    // Sine wave sweep for stretchy feel
+    const osc = audioContext.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(200 + Math.random() * 100, time);
+    osc.frequency.exponentialRampToValueAtTime(80 + Math.random() * 40, time + 0.2);
+    
+    // Add slight vibrato
+    const vibrato = audioContext.createOscillator();
+    vibrato.type = 'sine';
+    vibrato.frequency.value = 15 + Math.random() * 10;
+    
+    const vibratoGain = audioContext.createGain();
+    vibratoGain.gain.value = 20;
+    
+    vibrato.connect(vibratoGain);
+    vibratoGain.connect(osc.frequency);
+    
+    // Main gain
+    const gainNode = audioContext.createGain();
+    gainNode.gain.setValueAtTime(0, time);
+    gainNode.gain.linearRampToValueAtTime(0.1 * intensity, time + 0.03);
+    gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.2);
+    
+    // Filter
+    const filter = audioContext.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 600;
+    filter.Q.value = 3;
+    
+    osc.connect(filter);
+    filter.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    osc.start(time);
+    vibrato.start(time);
+    osc.stop(time + 0.25);
+    vibrato.stop(time + 0.25);
+}
+
+// Create a metallic tink for chrome/gold
+function playMetallicSound(intensity = 0.5) {
+    if (!isSoundEnabled || !audioContext) return;
+    
+    const now = Date.now();
+    if (now - lastSoundTime < SOUND_COOLDOWN * 1.5) return;
+    lastSoundTime = now;
+    
+    const time = audioContext.currentTime;
+    
+    // Multiple harmonics for metallic ring
+    const frequencies = [800, 1200, 1800, 2400].map(f => f + Math.random() * 100);
+    
+    frequencies.forEach((freq, i) => {
+        const osc = audioContext.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        
+        const gainNode = audioContext.createGain();
+        const vol = (0.05 / (i + 1)) * intensity;
+        gainNode.gain.setValueAtTime(vol, time);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.3 - i * 0.05);
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        osc.start(time);
+        osc.stop(time + 0.35);
+    });
+}
+
+// Create a crystalline sound for glass
+function playGlassSound(intensity = 0.5) {
+    if (!isSoundEnabled || !audioContext) return;
+    
+    const now = Date.now();
+    if (now - lastSoundTime < SOUND_COOLDOWN * 2) return;
+    lastSoundTime = now;
+    
+    const time = audioContext.currentTime;
+    
+    // High, pure tones
+    const frequencies = [2000, 2500, 3000].map(f => f + Math.random() * 200);
+    
+    frequencies.forEach((freq, i) => {
+        const osc = audioContext.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        
+        const gainNode = audioContext.createGain();
+        const vol = (0.03 / (i + 1)) * intensity;
+        gainNode.gain.setValueAtTime(0, time);
+        gainNode.gain.linearRampToValueAtTime(vol, time + 0.01);
+        gainNode.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
+        
+        osc.connect(gainNode);
+        gainNode.connect(audioContext.destination);
+        
+        osc.start(time);
+        osc.stop(time + 0.45);
+    });
+}
+
+// Play sound based on current material
+function playSculptSound(intensity = 0.5) {
+    switch (currentMaterial) {
+        case 'jelly':
+            playStretchSound(intensity);
+            break;
+        case 'gold':
+        case 'chrome':
+            playMetallicSound(intensity);
+            break;
+        case 'glass':
+            playGlassSound(intensity);
+            break;
+        default:
+            playSquishSound(intensity);
+    }
+}
+
+// Initialize audio on first user interaction
+document.addEventListener('click', () => initAudio(), { once: true });
+document.addEventListener('touchstart', () => initAudio(), { once: true });
+
 // --- Scene Setup ---
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(CONFIG.backgroundColor);
@@ -525,6 +741,7 @@ function sculpt(intersectPoint) {
         positionAttribute.needsUpdate = true;
         clayMesh.geometry.computeVertexNormals();
         triggerHaptic(5);
+        playSculptSound(0.5 + Math.random() * 0.3);
     }
 }
 
@@ -788,6 +1005,20 @@ settingsContainer.innerHTML = `
             margin: 16px 0;
         }
         
+        .action-button.sound {
+            background: #e8f5e9;
+            color: #2e7d32;
+        }
+        
+        .action-button.sound:hover {
+            background: #c8e6c9;
+        }
+        
+        .action-button.sound.muted {
+            background: #f0f0f0;
+            color: #999;
+        }
+        
         @keyframes spin {
             from { transform: rotate(0deg); }
             to { transform: rotate(360deg); }
@@ -846,6 +1077,11 @@ settingsContainer.innerHTML = `
         </div>
         
         <div class="divider"></div>
+        
+        <button class="action-button sound muted" id="sound-button">
+            <svg viewBox="0 0 24 24" fill="currentColor" id="sound-icon"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+            Sound Off
+        </button>
         
         <button class="action-button undo" id="undo-button">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
@@ -927,6 +1163,31 @@ document.getElementById('sculpt-strength').addEventListener('input', (e) => {
 document.getElementById('sculpt-radius').addEventListener('input', (e) => {
     CONFIG.sculptRadius = parseFloat(e.target.value);
     document.getElementById('sculpt-radius-value').textContent = CONFIG.sculptRadius.toFixed(1);
+});
+
+// Sound toggle button
+document.getElementById('sound-button').addEventListener('click', () => {
+    isSoundEnabled = !isSoundEnabled;
+    const soundButton = document.getElementById('sound-button');
+    
+    if (isSoundEnabled) {
+        soundButton.classList.remove('muted');
+        soundButton.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>
+            Sound On
+        `;
+    } else {
+        soundButton.classList.add('muted');
+        soundButton.innerHTML = `
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>
+            Sound Off
+        `;
+    }
+    
+    // Initialize audio context if not already done
+    if (isSoundEnabled) {
+        initAudio();
+    }
 });
 
 // Undo button
