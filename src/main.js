@@ -2,8 +2,7 @@ import * as THREE from 'three';
 
 // --- Configuration ---
 const CONFIG = {
-    clayColor: 0xE07A5F,
-    backgroundColor: 0xF5F5DC, // Beige
+    backgroundColor: 0xD4D0C8, // Soft warm gray
     rotationSpeed: 2.0, // Radians per second
     sculptStrength: 0.05,
     sculptRadius: 0.5, // Vertical influence radius
@@ -11,9 +10,78 @@ const CONFIG = {
     maxRadius: 3.5, // Don't sculpt thicker than this
     clayHeight: 5,
     clayRadius: 1.5,
-    segmentsRadial: 128,
-    segmentsHeight: 128
+    segmentsRadial: 64,
+    segmentsHeight: 64
 };
+
+// --- Material Presets ---
+const MATERIALS = {
+    clay: {
+        name: 'Clay',
+        color: 0xB5651D,  // Authentic terracotta brown
+        roughness: 0.9,
+        metalness: 0.0,
+        transparent: false,
+        opacity: 1,
+        envMapIntensity: 0.1,
+        isJelly: false
+    },
+    gold: {
+        name: 'Gold',
+        color: 0xFFD700,
+        roughness: 0.2,
+        metalness: 1.0,
+        transparent: false,
+        opacity: 1,
+        envMapIntensity: 1.0,
+        isJelly: false
+    },
+    glass: {
+        name: 'Glass',
+        color: 0x88CCFF,
+        roughness: 0.0,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.4,
+        envMapIntensity: 1.0,
+        isJelly: false
+    },
+    chrome: {
+        name: 'Chrome',
+        color: 0xCCCCCC,
+        roughness: 0.05,
+        metalness: 1.0,
+        transparent: false,
+        opacity: 1,
+        envMapIntensity: 1.5,
+        isJelly: false
+    },
+    jelly: {
+        name: 'Jelly',
+        color: 0xFF6B9D,
+        roughness: 0.2,
+        metalness: 0.0,
+        transparent: true,
+        opacity: 0.7,
+        envMapIntensity: 0.5,
+        isJelly: true
+    }
+};
+
+// --- Shape Templates ---
+const SHAPES = {
+    cylinder: 'Cylinder',
+    sphere: 'Sphere',
+    cone: 'Cone',
+    cube: 'Cube',
+    torus: 'Torus'
+};
+
+// --- State ---
+let currentMaterial = 'clay';
+let currentShape = 'cylinder';
+let historyStack = [];
+const MAX_HISTORY = 20;
 
 // --- Scene Setup ---
 const scene = new THREE.Scene();
@@ -23,11 +91,28 @@ const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerH
 camera.position.set(0, 3, 8);
 camera.lookAt(0, 0, 0);
 
-const renderer = new THREE.WebGLRenderer({ antialias: true });
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
+
+// --- Environment Map for Reflections ---
+const cubeTextureLoader = new THREE.CubeTextureLoader();
+// Create a simple gradient environment map
+const envCanvas = document.createElement('canvas');
+envCanvas.width = 256;
+envCanvas.height = 256;
+const envCtx = envCanvas.getContext('2d');
+const gradient = envCtx.createLinearGradient(0, 0, 0, 256);
+gradient.addColorStop(0, '#87CEEB');  // Sky blue
+gradient.addColorStop(0.5, '#F5F5DC'); // Beige
+gradient.addColorStop(1, '#D4C4B0');  // Light brown
+envCtx.fillStyle = gradient;
+envCtx.fillRect(0, 0, 256, 256);
+const envTexture = new THREE.CanvasTexture(envCanvas);
+envTexture.mapping = THREE.EquirectangularReflectionMapping;
+scene.environment = envTexture;
 
 // --- Lighting ---
 const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
@@ -40,53 +125,280 @@ dirLight.shadow.mapSize.width = 1024;
 dirLight.shadow.mapSize.height = 1024;
 scene.add(dirLight);
 
-// --- Clay Mesh ---
-// Generate a simple noise texture for the clay so we can see it spinning
-const canvas = document.createElement('canvas');
-canvas.width = 512;
-canvas.height = 512;
-const ctx = canvas.getContext('2d');
-ctx.fillStyle = '#E07A5F';
-ctx.fillRect(0,0,512,512);
-// Add noise
-for(let i=0; i<50000; i++) {
-    ctx.fillStyle = Math.random() > 0.5 ? '#cc6950' : '#f08a6f';
-    ctx.fillRect(Math.random()*512, Math.random()*512, 2, 2);
+// Additional rim light for better material visibility
+const rimLight = new THREE.DirectionalLight(0xffffff, 0.5);
+rimLight.position.set(-5, 5, -5);
+scene.add(rimLight);
+
+// --- Create Clay Texture for visible rotation ---
+const textureCanvas = document.createElement('canvas');
+textureCanvas.width = 512;
+textureCanvas.height = 512;
+const textureCtx = textureCanvas.getContext('2d');
+
+function generateClayTexture(baseColor) {
+    // Parse hex color
+    const r = (baseColor >> 16) & 255;
+    const g = (baseColor >> 8) & 255;
+    const b = baseColor & 255;
+    
+    textureCtx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+    textureCtx.fillRect(0, 0, 512, 512);
+    
+    // Add noise/grain for visible rotation
+    for (let i = 0; i < 30000; i++) {
+        const variation = (Math.random() - 0.5) * 40;
+        textureCtx.fillStyle = `rgb(${Math.max(0, Math.min(255, r + variation))}, ${Math.max(0, Math.min(255, g + variation))}, ${Math.max(0, Math.min(255, b + variation))})`;
+        textureCtx.fillRect(Math.random() * 512, Math.random() * 512, 2 + Math.random() * 3, 2 + Math.random() * 3);
+    }
+    
+    // Add some finger-like streaks
+    for (let i = 0; i < 20; i++) {
+        const streak = textureCtx.createLinearGradient(0, Math.random() * 512, 512, Math.random() * 512);
+        streak.addColorStop(0, `rgba(${r - 20}, ${g - 20}, ${b - 20}, 0)`);
+        streak.addColorStop(0.5, `rgba(${r - 20}, ${g - 20}, ${b - 20}, 0.3)`);
+        streak.addColorStop(1, `rgba(${r - 20}, ${g - 20}, ${b - 20}, 0)`);
+        textureCtx.fillStyle = streak;
+        textureCtx.fillRect(0, 0, 512, 512);
+    }
 }
-const clayTexture = new THREE.CanvasTexture(canvas);
 
-const geometry = new THREE.CylinderGeometry(
-    CONFIG.clayRadius, // radiusTop
-    CONFIG.clayRadius, // radiusBottom
-    CONFIG.clayHeight,
-    CONFIG.segmentsRadial,
-    CONFIG.segmentsHeight,
-    true // openEnded?
-);
-// Determine UVs properly or just use default. Default cylinder UVs wrap around.
+let clayTexture = new THREE.CanvasTexture(textureCanvas);
+clayTexture.wrapS = THREE.RepeatWrapping;
+clayTexture.wrapT = THREE.RepeatWrapping;
 
-const positionAttribute = geometry.attributes.position;
-const vertex = new THREE.Vector3();
+// --- Create Material ---
+function createMaterial(preset) {
+    const mat = MATERIALS[preset];
+    
+    // Regenerate texture with material color
+    generateClayTexture(mat.color);
+    clayTexture = new THREE.CanvasTexture(textureCanvas);
+    clayTexture.wrapS = THREE.RepeatWrapping;
+    clayTexture.wrapT = THREE.RepeatWrapping;
+    
+    return new THREE.MeshPhysicalMaterial({
+        map: mat.isJelly || preset === 'glass' ? null : clayTexture,
+        color: mat.color,
+        roughness: mat.roughness,
+        metalness: mat.metalness,
+        transparent: mat.transparent,
+        opacity: mat.opacity,
+        envMapIntensity: mat.envMapIntensity,
+        clearcoat: preset === 'glass' ? 1.0 : 0,
+        clearcoatRoughness: 0.1,
+        side: THREE.DoubleSide
+    });
+}
 
-const material = new THREE.MeshStandardMaterial({
-    map: clayTexture,
-    roughness: 0.8,
-    metalness: 0.1,
-});
+// --- Create Geometry ---
+function createGeometry(shape) {
+    const segments = CONFIG.segmentsRadial;
+    const heightSegments = CONFIG.segmentsHeight;
+    
+    switch (shape) {
+        case 'sphere':
+            return new THREE.SphereGeometry(CONFIG.clayRadius * 1.2, segments, heightSegments);
+        case 'cone':
+            return new THREE.ConeGeometry(CONFIG.clayRadius, CONFIG.clayHeight, segments, heightSegments, true);
+        case 'cube':
+            return new THREE.BoxGeometry(CONFIG.clayRadius * 2, CONFIG.clayHeight, CONFIG.clayRadius * 2, segments / 4, heightSegments, segments / 4);
+        case 'torus':
+            return new THREE.TorusGeometry(CONFIG.clayRadius, CONFIG.clayRadius * 0.5, heightSegments, segments);
+        case 'cylinder':
+        default:
+            return new THREE.CylinderGeometry(
+                CONFIG.clayRadius,
+                CONFIG.clayRadius,
+                CONFIG.clayHeight,
+                segments,
+                heightSegments,
+                true
+            );
+    }
+}
 
-const clayMesh = new THREE.Mesh(geometry, material);
+// --- Clay Mesh ---
+let geometry = createGeometry(currentShape);
+let material = createMaterial(currentMaterial);
+let clayMesh = new THREE.Mesh(geometry, material);
 clayMesh.castShadow = true;
 clayMesh.receiveShadow = true;
 scene.add(clayMesh);
 
+// Store original positions for reset
+let originalPositions = null;
+
+function storeOriginalPositions() {
+    const positions = clayMesh.geometry.attributes.position.array;
+    originalPositions = new Float32Array(positions);
+}
+storeOriginalPositions();
+
+// --- Jelly Physics State ---
+let velocities = null;
+let restPositions = null;
+
+function initJellyPhysics() {
+    const positions = clayMesh.geometry.attributes.position;
+    const count = positions.count;
+    velocities = new Float32Array(count * 3);
+    restPositions = new Float32Array(positions.array);
+}
+
+function updateJellyPhysics(delta) {
+    if (!MATERIALS[currentMaterial].isJelly || !velocities) return;
+    
+    const positions = clayMesh.geometry.attributes.position;
+    const count = positions.count;
+    
+    const stiffness = 15.0;  // Spring stiffness
+    const damping = 0.85;    // Velocity damping
+    const maxVelocity = 2.0;
+    
+    for (let i = 0; i < count; i++) {
+        const i3 = i * 3;
+        
+        // Calculate spring force towards rest position
+        const dx = restPositions[i3] - positions.array[i3];
+        const dy = restPositions[i3 + 1] - positions.array[i3 + 1];
+        const dz = restPositions[i3 + 2] - positions.array[i3 + 2];
+        
+        // Apply spring acceleration
+        velocities[i3] += dx * stiffness * delta;
+        velocities[i3 + 1] += dy * stiffness * delta;
+        velocities[i3 + 2] += dz * stiffness * delta;
+        
+        // Apply damping
+        velocities[i3] *= damping;
+        velocities[i3 + 1] *= damping;
+        velocities[i3 + 2] *= damping;
+        
+        // Clamp velocity
+        velocities[i3] = Math.max(-maxVelocity, Math.min(maxVelocity, velocities[i3]));
+        velocities[i3 + 1] = Math.max(-maxVelocity, Math.min(maxVelocity, velocities[i3 + 1]));
+        velocities[i3 + 2] = Math.max(-maxVelocity, Math.min(maxVelocity, velocities[i3 + 2]));
+        
+        // Update position
+        positions.array[i3] += velocities[i3] * delta;
+        positions.array[i3 + 1] += velocities[i3 + 1] * delta;
+        positions.array[i3 + 2] += velocities[i3 + 2] * delta;
+    }
+    
+    positions.needsUpdate = true;
+    clayMesh.geometry.computeVertexNormals();
+}
+
+// --- History Management ---
+function saveToHistory() {
+    const positions = clayMesh.geometry.attributes.position.array;
+    historyStack.push(new Float32Array(positions));
+    if (historyStack.length > MAX_HISTORY) {
+        historyStack.shift();
+    }
+}
+
+function undo() {
+    if (historyStack.length === 0) return false;
+    
+    const previousState = historyStack.pop();
+    const positions = clayMesh.geometry.attributes.position;
+    positions.array.set(previousState);
+    positions.needsUpdate = true;
+    clayMesh.geometry.computeVertexNormals();
+    
+    // Update rest positions for jelly
+    if (restPositions) {
+        restPositions.set(previousState);
+    }
+    
+    triggerHaptic(10);
+    return true;
+}
+
+function resetShape() {
+    if (!originalPositions) return;
+    
+    const positions = clayMesh.geometry.attributes.position;
+    positions.array.set(originalPositions);
+    positions.needsUpdate = true;
+    clayMesh.geometry.computeVertexNormals();
+    
+    // Clear history
+    historyStack = [];
+    
+    // Reset jelly physics
+    if (restPositions) {
+        restPositions.set(originalPositions);
+        velocities.fill(0);
+    }
+    
+    triggerHaptic(50);
+}
+
+function changeShape(newShape) {
+    if (newShape === currentShape) return;
+    
+    currentShape = newShape;
+    
+    // Remove old mesh
+    scene.remove(clayMesh);
+    clayMesh.geometry.dispose();
+    
+    // Create new geometry
+    geometry = createGeometry(currentShape);
+    clayMesh = new THREE.Mesh(geometry, material);
+    clayMesh.castShadow = true;
+    clayMesh.receiveShadow = true;
+    scene.add(clayMesh);
+    
+    // Reset state
+    storeOriginalPositions();
+    historyStack = [];
+    
+    if (MATERIALS[currentMaterial].isJelly) {
+        initJellyPhysics();
+    }
+    
+    triggerHaptic(30);
+}
+
+function changeMaterial(newMaterial) {
+    if (newMaterial === currentMaterial) return;
+    
+    currentMaterial = newMaterial;
+    material.dispose();
+    material = createMaterial(currentMaterial);
+    clayMesh.material = material;
+    
+    // Initialize or clean up jelly physics
+    if (MATERIALS[currentMaterial].isJelly) {
+        initJellyPhysics();
+    } else {
+        velocities = null;
+    }
+    
+    triggerHaptic(20);
+}
+
+// --- Haptic Feedback ---
+let lastHapticTime = 0;
+const HAPTIC_COOLDOWN = 50; // ms
+
+function triggerHaptic(duration = 10) {
+    const now = Date.now();
+    if (now - lastHapticTime < HAPTIC_COOLDOWN) return;
+    
+    if (navigator.vibrate) {
+        navigator.vibrate(duration);
+        lastHapticTime = now;
+    }
+}
+
 // --- Invisible Plane for Raycasting ---
-// This plane bisects the cylinder and faces the camera roughly.
-// Since our camera is at (0, 3, 8), a plane at Z=0 is perfect.
 const planeGeo = new THREE.PlaneGeometry(20, 20);
 const planeMat = new THREE.MeshBasicMaterial({ visible: false, side: THREE.DoubleSide });
 const sculptPlane = new THREE.Mesh(planeGeo, planeMat);
-// We want the plane to align with the axis of rotation (Y) and be roughly perpendicular to camera view.
-// Default PlaneGeometry is in XY plane (normal Z). That works for Z distance check.
 scene.add(sculptPlane);
 
 // --- Cursor Helper ---
@@ -94,7 +406,6 @@ const cursorGeo = new THREE.SphereGeometry(0.1, 16, 16);
 const cursorMat = new THREE.MeshBasicMaterial({ color: 0xff0000, transparent: true, opacity: 0.5 });
 const cursorMesh = new THREE.Mesh(cursorGeo, cursorMat);
 scene.add(cursorMesh);
-
 
 // --- Floor ---
 const floorGeo = new THREE.PlaneGeometry(20, 20);
@@ -105,28 +416,40 @@ const floorMat = new THREE.MeshStandardMaterial({
 });
 const floor = new THREE.Mesh(floorGeo, floorMat);
 floor.rotation.x = -Math.PI / 2;
-floor.position.y = -CONFIG.clayHeight / 2 - 0.1; // Just below the clay
+floor.position.y = -CONFIG.clayHeight / 2 - 0.1;
 floor.receiveShadow = true;
 scene.add(floor);
-
 
 // --- Interaction Logic ---
 const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 let isMouseDown = false;
+let isSculpting = false;
+let sculptStartTime = 0;
 
 window.addEventListener('mousemove', (event) => {
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 });
 
-window.addEventListener('mousedown', () => { isMouseDown = true; });
-window.addEventListener('mouseup', () => { isMouseDown = false; });
+window.addEventListener('mousedown', () => {
+    isMouseDown = true;
+    sculptStartTime = Date.now();
+});
+
+window.addEventListener('mouseup', () => {
+    if (isSculpting && Date.now() - sculptStartTime > 100) {
+        saveToHistory();
+    }
+    isMouseDown = false;
+    isSculpting = false;
+});
 
 // --- Touch Support ---
 window.addEventListener('touchstart', (event) => {
     event.preventDefault();
     isMouseDown = true;
+    sculptStartTime = Date.now();
     const touch = event.touches[0];
     mouse.x = (touch.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
@@ -139,34 +462,29 @@ window.addEventListener('touchmove', (event) => {
     mouse.y = -(touch.clientY / window.innerHeight) * 2 + 1;
 }, { passive: false });
 
-window.addEventListener('touchend', () => { isMouseDown = false; });
-window.addEventListener('touchcancel', () => { isMouseDown = false; });
+window.addEventListener('touchend', () => {
+    if (isSculpting && Date.now() - sculptStartTime > 100) {
+        saveToHistory();
+    }
+    isMouseDown = false;
+    isSculpting = false;
+});
+window.addEventListener('touchcancel', () => {
+    isMouseDown = false;
+    isSculpting = false;
+});
 
 // Sculpting Function
 function sculpt(intersectPoint) {
-    // The intersectPoint is on the plane Z=0.
-    // localPoint relative to mesh? Mesh is at 0,0,0.
-    // So intersectPoint IS the local point (ignoring rotation for the "radius" target).
-    
-    // We want the radius at this Y height to become the distance from Y axis.
-    // P = (x, y, 0). Dist = abs(x).
-    
-    // However, the user might be dragging outside the mesh to "pull" or inside to "push".
-    // Reference radius is simply abs(intersectPoint.x).
+    const positionAttribute = clayMesh.geometry.attributes.position;
     
     let targetRadius = Math.abs(intersectPoint.x);
-    
-    // Clamp target radius
     targetRadius = Math.max(CONFIG.minRadius, Math.min(CONFIG.maxRadius, targetRadius));
 
-    // Y level
     const targetY = intersectPoint.y;
-    
-    // Apply changes
     const count = positionAttribute.count;
     let needsUpdate = false;
 
-    // Iterate vertices
     for (let i = 0; i < count; i++) {
         const y = positionAttribute.getY(i);
         const dy = Math.abs(y - targetY);
@@ -176,11 +494,7 @@ function sculpt(intersectPoint) {
             const z = positionAttribute.getZ(i);
             const currentRadius = Math.sqrt(x*x + z*z);
             
-            // Influence factor
-            const factor = Math.exp(- (dy * dy) / (0.1)); // Shape of the tool
-            
-            // Move towards target radius
-            // We use lerp to make it feel like "pressure" over time
+            const factor = Math.exp(- (dy * dy) / (0.1));
             const speed = CONFIG.sculptStrength; 
             const newRadius = currentRadius + (targetRadius - currentRadius) * factor * speed;
             
@@ -188,18 +502,31 @@ function sculpt(intersectPoint) {
             positionAttribute.setX(i, Math.cos(angle) * newRadius);
             positionAttribute.setZ(i, Math.sin(angle) * newRadius);
             
+            // Update rest position for jelly physics
+            if (restPositions) {
+                const i3 = i * 3;
+                restPositions[i3] = Math.cos(angle) * newRadius;
+                restPositions[i3 + 2] = Math.sin(angle) * newRadius;
+                
+                // Add impulse to jelly
+                if (velocities) {
+                    const impulse = (targetRadius - currentRadius) * factor * 0.5;
+                    velocities[i3] += Math.cos(angle) * impulse;
+                    velocities[i3 + 2] += Math.sin(angle) * impulse;
+                }
+            }
+            
             needsUpdate = true;
+            isSculpting = true;
         }
     }
 
     if (needsUpdate) {
         positionAttribute.needsUpdate = true;
-        geometry.computeVertexNormals();
+        clayMesh.geometry.computeVertexNormals();
+        triggerHaptic(5);
     }
 }
-
-
-
 
 // Handle window resize
 window.addEventListener('resize', () => {
@@ -212,7 +539,6 @@ window.addEventListener('resize', () => {
 let isInteractingWithGUI = false;
 let isMenuOpen = false;
 
-// Create settings container
 const settingsContainer = document.createElement('div');
 settingsContainer.id = 'settings-container';
 settingsContainer.innerHTML = `
@@ -268,7 +594,9 @@ settingsContainer.innerHTML = `
             position: absolute;
             top: 60px;
             right: 0;
-            width: 260px;
+            width: 280px;
+            max-height: 70vh;
+            overflow-y: auto;
             background: rgba(255, 255, 255, 0.95);
             backdrop-filter: blur(10px);
             border-radius: 16px;
@@ -338,67 +666,126 @@ settingsContainer.innerHTML = `
             text-align: right;
         }
         
-        .color-picker-wrapper {
+        .button-group {
             display: flex;
-            align-items: center;
-            gap: 12px;
+            gap: 8px;
+            flex-wrap: wrap;
         }
         
-        .color-picker {
-            width: 40px;
-            height: 40px;
-            border: none;
-            border-radius: 8px;
+        .preset-button {
+            flex: 1;
+            min-width: 70px;
+            padding: 10px 8px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            background: white;
             cursor: pointer;
-            padding: 0;
+            font-size: 11px;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.2s ease;
+            text-align: center;
+        }
+        
+        .preset-button:hover {
+            border-color: #E07A5F;
+            color: #E07A5F;
+        }
+        
+        .preset-button.active {
+            background: #E07A5F;
+            border-color: #E07A5F;
+            color: white;
+        }
+        
+        .material-button {
+            position: relative;
             overflow: hidden;
         }
         
-        .color-preview {
-            width: 40px;
-            height: 40px;
-            border-radius: 8px;
-            background: #E07A5F;
-            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        .material-button::before {
+            content: '';
+            position: absolute;
+            top: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
         }
         
-        #share-button {
+        .material-button[data-material="clay"]::before { background: #B5651D; }
+        .material-button[data-material="gold"]::before { background: linear-gradient(135deg, #FFD700, #FFA500); }
+        .material-button[data-material="glass"]::before { background: linear-gradient(135deg, #88CCFF, #AADDFF); opacity: 0.6; }
+        .material-button[data-material="chrome"]::before { background: linear-gradient(135deg, #FFFFFF, #888888); }
+        .material-button[data-material="jelly"]::before { background: linear-gradient(135deg, #FF6B9D, #FF8FB1); }
+        
+        .material-button span {
+            position: relative;
+            display: block;
+            margin-top: 24px;
+        }
+        
+        .action-button {
             width: 100%;
-            padding: 14px 20px;
-            margin-top: 16px;
-            background: linear-gradient(135deg, #E07A5F 0%, #c96b52 100%);
+            padding: 12px 16px;
+            margin-top: 8px;
             border: none;
-            border-radius: 12px;
-            color: white;
-            font-size: 14px;
-            font-weight: 600;
+            border-radius: 10px;
             cursor: pointer;
+            font-size: 13px;
+            font-weight: 600;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 10px;
-            transition: all 0.3s ease;
+            gap: 8px;
+            transition: all 0.2s ease;
+        }
+        
+        .action-button svg {
+            width: 16px;
+            height: 16px;
+        }
+        
+        .action-button.undo {
+            background: #f0f0f0;
+            color: #666;
+        }
+        
+        .action-button.undo:hover {
+            background: #e0e0e0;
+        }
+        
+        .action-button.reset {
+            background: #fee2e2;
+            color: #dc2626;
+        }
+        
+        .action-button.reset:hover {
+            background: #fecaca;
+        }
+        
+        .action-button.share {
+            background: linear-gradient(135deg, #E07A5F 0%, #c96b52 100%);
+            color: white;
             box-shadow: 0 4px 12px rgba(224, 122, 95, 0.3);
         }
         
-        #share-button:hover {
+        .action-button.share:hover {
             transform: translateY(-2px);
             box-shadow: 0 6px 20px rgba(224, 122, 95, 0.4);
         }
         
-        #share-button:active {
-            transform: translateY(0);
+        .action-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
         }
         
-        #share-button svg {
-            width: 18px;
-            height: 18px;
-            fill: white;
-        }
-        
-        #share-button.sharing {
-            opacity: 0.7;
-            pointer-events: none;
+        .divider {
+            height: 1px;
+            background: #e0e0e0;
+            margin: 16px 0;
         }
         
         @keyframes spin {
@@ -414,6 +801,32 @@ settingsContainer.innerHTML = `
     </button>
     
     <div id="settings-menu">
+        <div class="setting-group">
+            <label class="setting-label">Shape</label>
+            <div class="button-group">
+                <button class="preset-button active" data-shape="cylinder">Cylinder</button>
+                <button class="preset-button" data-shape="sphere">Sphere</button>
+                <button class="preset-button" data-shape="cone">Cone</button>
+                <button class="preset-button" data-shape="cube">Cube</button>
+                <button class="preset-button" data-shape="torus">Torus</button>
+            </div>
+        </div>
+        
+        <div class="divider"></div>
+        
+        <div class="setting-group">
+            <label class="setting-label">Material</label>
+            <div class="button-group">
+                <button class="preset-button material-button active" data-material="clay"><span>Clay</span></button>
+                <button class="preset-button material-button" data-material="gold"><span>Gold</span></button>
+                <button class="preset-button material-button" data-material="glass"><span>Glass</span></button>
+                <button class="preset-button material-button" data-material="chrome"><span>Chrome</span></button>
+                <button class="preset-button material-button" data-material="jelly"><span>Jelly</span></button>
+            </div>
+        </div>
+        
+        <div class="divider"></div>
+        
         <div class="setting-group">
             <label class="setting-label">Rotation Speed</label>
             <input type="range" class="setting-slider" id="rotation-speed" min="0" max="10" step="0.1" value="${CONFIG.rotationSpeed}">
@@ -432,17 +845,20 @@ settingsContainer.innerHTML = `
             <div class="setting-value" id="sculpt-radius-value">${CONFIG.sculptRadius.toFixed(1)}</div>
         </div>
         
-        <div class="setting-group">
-            <label class="setting-label">Clay Color</label>
-            <div class="color-picker-wrapper">
-                <input type="color" class="color-picker" id="clay-color" value="#E07A5F">
-            </div>
-        </div>
+        <div class="divider"></div>
         
-        <button id="share-button">
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
-            </svg>
+        <button class="action-button undo" id="undo-button">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12.5 8c-2.65 0-5.05.99-6.9 2.6L2 7v9h9l-3.62-3.62c1.39-1.16 3.16-1.88 5.12-1.88 3.54 0 6.55 2.31 7.6 5.5l2.37-.78C21.08 11.03 17.15 8 12.5 8z"/></svg>
+            Undo
+        </button>
+        
+        <button class="action-button reset" id="reset-button">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z"/></svg>
+            Reset Shape
+        </button>
+        
+        <button class="action-button share" id="share-button">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
             Share Sculpture
         </button>
     </div>
@@ -479,6 +895,24 @@ settingsContainer.addEventListener('touchstart', (e) => {
 settingsContainer.addEventListener('touchend', () => { isInteractingWithGUI = false; });
 settingsContainer.addEventListener('touchcancel', () => { isInteractingWithGUI = false; });
 
+// Shape buttons
+document.querySelectorAll('[data-shape]').forEach(button => {
+    button.addEventListener('click', () => {
+        document.querySelectorAll('[data-shape]').forEach(b => b.classList.remove('active'));
+        button.classList.add('active');
+        changeShape(button.dataset.shape);
+    });
+});
+
+// Material buttons
+document.querySelectorAll('[data-material]').forEach(button => {
+    button.addEventListener('click', () => {
+        document.querySelectorAll('[data-material]').forEach(b => b.classList.remove('active'));
+        button.classList.add('active');
+        changeMaterial(button.dataset.material);
+    });
+});
+
 // Slider event listeners
 document.getElementById('rotation-speed').addEventListener('input', (e) => {
     CONFIG.rotationSpeed = parseFloat(e.target.value);
@@ -495,69 +929,49 @@ document.getElementById('sculpt-radius').addEventListener('input', (e) => {
     document.getElementById('sculpt-radius-value').textContent = CONFIG.sculptRadius.toFixed(1);
 });
 
-document.getElementById('clay-color').addEventListener('input', (e) => {
-    const color = e.target.value;
-    material.color.setStyle(color);
+// Undo button
+document.getElementById('undo-button').addEventListener('click', () => {
+    undo();
 });
 
-// Share button functionality
+// Reset button
+document.getElementById('reset-button').addEventListener('click', () => {
+    resetShape();
+});
+
+// Share button
 document.getElementById('share-button').addEventListener('click', async () => {
     const shareButton = document.getElementById('share-button');
-    shareButton.classList.add('sharing');
+    shareButton.disabled = true;
     shareButton.innerHTML = `
-        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="animation: spin 1s linear infinite;">
+        <svg viewBox="0 0 24 24" fill="currentColor" style="animation: spin 1s linear infinite;">
             <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
         </svg>
         Capturing...
     `;
     
     try {
-        // Hide cursor and settings for clean screenshot
-        const wasMenuOpen = isMenuOpen;
         cursorMesh.visible = false;
         settingsContainer.style.visibility = 'hidden';
-        
-        // Render one frame to update the scene
         renderer.render(scene, camera);
         
-        // Get the canvas data
         const canvas = renderer.domElement;
-        
-        // Convert canvas to blob
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-        const file = new File([blob], 'my-clay-sculpture.png', { type: 'image/png' });
+        const file = new File([blob], 'my-sculpture.png', { type: 'image/png' });
         
-        // Restore UI
         settingsContainer.style.visibility = 'visible';
         
-        // Check if Web Share API is available and can share files
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
             await navigator.share({
                 files: [file],
-                title: 'My Clay Sculpture',
-                text: 'Check out my clay sculpture! 🎨'
-            });
-        } else if (navigator.share) {
-            // Fallback: share without file (just text/url)
-            // First download the image
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'my-clay-sculpture.png';
-            a.click();
-            URL.revokeObjectURL(url);
-            
-            // Then try to share text
-            await navigator.share({
-                title: 'My Clay Sculpture',
-                text: 'Check out my clay sculpture! 🎨'
+                title: 'My Sculpture',
+                text: 'Check out my sculpture! 🎨'
             });
         } else {
-            // Fallback for desktop: just download
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = 'my-clay-sculpture.png';
+            a.download = 'my-sculpture.png';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
@@ -568,12 +982,9 @@ document.getElementById('share-button').addEventListener('click', async () => {
             console.error('Share failed:', error);
         }
     } finally {
-        // Restore button state
-        shareButton.classList.remove('sharing');
+        shareButton.disabled = false;
         shareButton.innerHTML = `
-            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
-            </svg>
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/></svg>
             Share Sculpture
         `;
         settingsContainer.style.visibility = 'visible';
@@ -591,7 +1002,10 @@ function animate() {
     // 1. Rotate Clay
     clayMesh.rotation.y += CONFIG.rotationSpeed * delta;
 
-    // 2. Mouse sculpting
+    // 2. Update jelly physics
+    updateJellyPhysics(delta);
+
+    // 3. Mouse sculpting
     raycaster.setFromCamera(mouse, camera);
     
     const intersects = raycaster.intersectObject(sculptPlane);
@@ -618,4 +1032,3 @@ function animate() {
 }
 
 animate();
-
