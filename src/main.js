@@ -219,6 +219,9 @@ gui.addColor(CONFIG, 'clayColor').onChange(c => material.color.setHex(c));
 // Add hide/show toggle
 gui.add({ hideControls: () => gui.hide() }, 'hideControls').name('Hide Controls');
 
+// Close controls by default
+gui.close();
+
 // Variable to track GUI interaction
 let isInteractingWithGUI = false;
 
