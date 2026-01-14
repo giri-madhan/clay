@@ -361,6 +361,50 @@ settingsContainer.innerHTML = `
             background: #E07A5F;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         }
+        
+        #share-button {
+            width: 100%;
+            padding: 14px 20px;
+            margin-top: 16px;
+            background: linear-gradient(135deg, #E07A5F 0%, #c96b52 100%);
+            border: none;
+            border-radius: 12px;
+            color: white;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 12px rgba(224, 122, 95, 0.3);
+        }
+        
+        #share-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(224, 122, 95, 0.4);
+        }
+        
+        #share-button:active {
+            transform: translateY(0);
+        }
+        
+        #share-button svg {
+            width: 18px;
+            height: 18px;
+            fill: white;
+        }
+        
+        #share-button.sharing {
+            opacity: 0.7;
+            pointer-events: none;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
     </style>
     
     <button id="gear-button" title="Settings">
@@ -394,6 +438,13 @@ settingsContainer.innerHTML = `
                 <input type="color" class="color-picker" id="clay-color" value="#E07A5F">
             </div>
         </div>
+        
+        <button id="share-button">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
+            </svg>
+            Share Sculpture
+        </button>
     </div>
 `;
 document.body.appendChild(settingsContainer);
@@ -449,6 +500,85 @@ document.getElementById('clay-color').addEventListener('input', (e) => {
     material.color.setStyle(color);
 });
 
+// Share button functionality
+document.getElementById('share-button').addEventListener('click', async () => {
+    const shareButton = document.getElementById('share-button');
+    shareButton.classList.add('sharing');
+    shareButton.innerHTML = `
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" style="animation: spin 1s linear infinite;">
+            <path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/>
+        </svg>
+        Capturing...
+    `;
+    
+    try {
+        // Hide cursor and settings for clean screenshot
+        const wasMenuOpen = isMenuOpen;
+        cursorMesh.visible = false;
+        settingsContainer.style.visibility = 'hidden';
+        
+        // Render one frame to update the scene
+        renderer.render(scene, camera);
+        
+        // Get the canvas data
+        const canvas = renderer.domElement;
+        
+        // Convert canvas to blob
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        const file = new File([blob], 'my-clay-sculpture.png', { type: 'image/png' });
+        
+        // Restore UI
+        settingsContainer.style.visibility = 'visible';
+        
+        // Check if Web Share API is available and can share files
+        if (navigator.canShare && navigator.canShare({ files: [file] })) {
+            await navigator.share({
+                files: [file],
+                title: 'My Clay Sculpture',
+                text: 'Check out my clay sculpture! 🎨'
+            });
+        } else if (navigator.share) {
+            // Fallback: share without file (just text/url)
+            // First download the image
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'my-clay-sculpture.png';
+            a.click();
+            URL.revokeObjectURL(url);
+            
+            // Then try to share text
+            await navigator.share({
+                title: 'My Clay Sculpture',
+                text: 'Check out my clay sculpture! 🎨'
+            });
+        } else {
+            // Fallback for desktop: just download
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'my-clay-sculpture.png';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    } catch (error) {
+        if (error.name !== 'AbortError') {
+            console.error('Share failed:', error);
+        }
+    } finally {
+        // Restore button state
+        shareButton.classList.remove('sharing');
+        shareButton.innerHTML = `
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                <path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92-1.31-2.92-2.92-2.92z"/>
+            </svg>
+            Share Sculpture
+        `;
+        settingsContainer.style.visibility = 'visible';
+    }
+});
 
 // --- Animation Loop ---
 const clock = new THREE.Clock();
