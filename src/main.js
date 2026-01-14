@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { GUI } from 'lil-gui';
 
 // --- Configuration ---
 const CONFIG = {
@@ -209,42 +208,245 @@ window.addEventListener('resize', () => {
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
-// --- GUI ---
-const gui = new GUI();
-gui.add(CONFIG, 'rotationSpeed', 0, 10);
-gui.add(CONFIG, 'sculptStrength', 0.01, 0.5);
-gui.add(CONFIG, 'sculptRadius', 0.1, 2.0);
-gui.addColor(CONFIG, 'clayColor').onChange(c => material.color.setHex(c));
-
-// Add hide/show toggle
-gui.add({ hideControls: () => gui.hide() }, 'hideControls').name('Hide Controls');
-
-// Close controls by default
-gui.close();
-
-// Variable to track GUI interaction
+// --- Custom Settings Menu ---
 let isInteractingWithGUI = false;
+let isMenuOpen = false;
 
-// Prevent GUI touch/mouse events from affecting clay
-const guiElement = gui.domElement;
-guiElement.addEventListener('mouseenter', () => { isInteractingWithGUI = true; });
-guiElement.addEventListener('mouseleave', () => { isInteractingWithGUI = false; });
-guiElement.addEventListener('touchstart', (e) => { 
+// Create settings container
+const settingsContainer = document.createElement('div');
+settingsContainer.id = 'settings-container';
+settingsContainer.innerHTML = `
+    <style>
+        #settings-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        
+        #gear-button {
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.9);
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            transition: all 0.3s ease;
+        }
+        
+        #gear-button:hover {
+            background: rgba(255, 255, 255, 1);
+            transform: scale(1.05);
+            box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+        }
+        
+        #gear-button.active {
+            background: #E07A5F;
+        }
+        
+        #gear-button.active svg {
+            fill: white;
+        }
+        
+        #gear-button svg {
+            width: 24px;
+            height: 24px;
+            fill: #333;
+            transition: transform 0.4s ease;
+        }
+        
+        #gear-button.active svg {
+            transform: rotate(90deg);
+        }
+        
+        #settings-menu {
+            position: absolute;
+            top: 60px;
+            right: 0;
+            width: 260px;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            border-radius: 16px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+            padding: 20px;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-10px) scale(0.95);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        
+        #settings-menu.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0) scale(1);
+        }
+        
+        .setting-group {
+            margin-bottom: 16px;
+        }
+        
+        .setting-group:last-child {
+            margin-bottom: 0;
+        }
+        
+        .setting-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            display: block;
+        }
+        
+        .setting-slider {
+            width: 100%;
+            height: 6px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #e0e0e0;
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }
+        
+        .setting-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #E07A5F;
+            border-radius: 50%;
+            cursor: pointer;
+            box-shadow: 0 2px 6px rgba(224, 122, 95, 0.4);
+            transition: transform 0.2s ease;
+        }
+        
+        .setting-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.1);
+        }
+        
+        .setting-value {
+            font-size: 11px;
+            color: #999;
+            margin-top: 4px;
+            text-align: right;
+        }
+        
+        .color-picker-wrapper {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        
+        .color-picker {
+            width: 40px;
+            height: 40px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            padding: 0;
+            overflow: hidden;
+        }
+        
+        .color-preview {
+            width: 40px;
+            height: 40px;
+            border-radius: 8px;
+            background: #E07A5F;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+    </style>
+    
+    <button id="gear-button" title="Settings">
+        <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+            <path d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z"/>
+        </svg>
+    </button>
+    
+    <div id="settings-menu">
+        <div class="setting-group">
+            <label class="setting-label">Rotation Speed</label>
+            <input type="range" class="setting-slider" id="rotation-speed" min="0" max="10" step="0.1" value="${CONFIG.rotationSpeed}">
+            <div class="setting-value" id="rotation-speed-value">${CONFIG.rotationSpeed.toFixed(1)}</div>
+        </div>
+        
+        <div class="setting-group">
+            <label class="setting-label">Sculpt Strength</label>
+            <input type="range" class="setting-slider" id="sculpt-strength" min="0.01" max="0.5" step="0.01" value="${CONFIG.sculptStrength}">
+            <div class="setting-value" id="sculpt-strength-value">${CONFIG.sculptStrength.toFixed(2)}</div>
+        </div>
+        
+        <div class="setting-group">
+            <label class="setting-label">Sculpt Radius</label>
+            <input type="range" class="setting-slider" id="sculpt-radius" min="0.1" max="2.0" step="0.1" value="${CONFIG.sculptRadius}">
+            <div class="setting-value" id="sculpt-radius-value">${CONFIG.sculptRadius.toFixed(1)}</div>
+        </div>
+        
+        <div class="setting-group">
+            <label class="setting-label">Clay Color</label>
+            <div class="color-picker-wrapper">
+                <input type="color" class="color-picker" id="clay-color" value="#E07A5F">
+            </div>
+        </div>
+    </div>
+`;
+document.body.appendChild(settingsContainer);
+
+// Get elements
+const gearButton = document.getElementById('gear-button');
+const settingsMenu = document.getElementById('settings-menu');
+
+// Toggle menu
+gearButton.addEventListener('click', () => {
+    isMenuOpen = !isMenuOpen;
+    gearButton.classList.toggle('active', isMenuOpen);
+    settingsMenu.classList.toggle('open', isMenuOpen);
+});
+
+// Close menu when clicking outside
+document.addEventListener('click', (e) => {
+    if (!settingsContainer.contains(e.target) && isMenuOpen) {
+        isMenuOpen = false;
+        gearButton.classList.remove('active');
+        settingsMenu.classList.remove('open');
+    }
+});
+
+// Prevent GUI interactions from affecting clay sculpting
+settingsContainer.addEventListener('mouseenter', () => { isInteractingWithGUI = true; });
+settingsContainer.addEventListener('mouseleave', () => { isInteractingWithGUI = false; });
+settingsContainer.addEventListener('touchstart', (e) => { 
     isInteractingWithGUI = true; 
     e.stopPropagation(); 
 }, { passive: false });
-guiElement.addEventListener('touchend', () => { isInteractingWithGUI = false; });
-guiElement.addEventListener('touchcancel', () => { isInteractingWithGUI = false; });
+settingsContainer.addEventListener('touchend', () => { isInteractingWithGUI = false; });
+settingsContainer.addEventListener('touchcancel', () => { isInteractingWithGUI = false; });
 
-// Add keyboard shortcut to show GUI (press 'h')
-window.addEventListener('keydown', (e) => {
-    if (e.key === 'h' || e.key === 'H') {
-        if (gui._hidden) {
-            gui.show();
-        } else {
-            gui.hide();
-        }
-    }
+// Slider event listeners
+document.getElementById('rotation-speed').addEventListener('input', (e) => {
+    CONFIG.rotationSpeed = parseFloat(e.target.value);
+    document.getElementById('rotation-speed-value').textContent = CONFIG.rotationSpeed.toFixed(1);
+});
+
+document.getElementById('sculpt-strength').addEventListener('input', (e) => {
+    CONFIG.sculptStrength = parseFloat(e.target.value);
+    document.getElementById('sculpt-strength-value').textContent = CONFIG.sculptStrength.toFixed(2);
+});
+
+document.getElementById('sculpt-radius').addEventListener('input', (e) => {
+    CONFIG.sculptRadius = parseFloat(e.target.value);
+    document.getElementById('sculpt-radius-value').textContent = CONFIG.sculptRadius.toFixed(1);
+});
+
+document.getElementById('clay-color').addEventListener('input', (e) => {
+    const color = e.target.value;
+    material.color.setStyle(color);
 });
 
 
