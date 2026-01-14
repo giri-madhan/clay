@@ -216,6 +216,34 @@ gui.add(CONFIG, 'sculptStrength', 0.01, 0.5);
 gui.add(CONFIG, 'sculptRadius', 0.1, 2.0);
 gui.addColor(CONFIG, 'clayColor').onChange(c => material.color.setHex(c));
 
+// Add hide/show toggle
+gui.add({ hideControls: () => gui.hide() }, 'hideControls').name('Hide Controls');
+
+// Variable to track GUI interaction
+let isInteractingWithGUI = false;
+
+// Prevent GUI touch/mouse events from affecting clay
+const guiElement = gui.domElement;
+guiElement.addEventListener('mouseenter', () => { isInteractingWithGUI = true; });
+guiElement.addEventListener('mouseleave', () => { isInteractingWithGUI = false; });
+guiElement.addEventListener('touchstart', (e) => { 
+    isInteractingWithGUI = true; 
+    e.stopPropagation(); 
+}, { passive: false });
+guiElement.addEventListener('touchend', () => { isInteractingWithGUI = false; });
+guiElement.addEventListener('touchcancel', () => { isInteractingWithGUI = false; });
+
+// Add keyboard shortcut to show GUI (press 'h')
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'h' || e.key === 'H') {
+        if (gui._hidden) {
+            gui.show();
+        } else {
+            gui.hide();
+        }
+    }
+});
+
 
 // --- Animation Loop ---
 const clock = new THREE.Clock();
@@ -241,7 +269,7 @@ function animate() {
             cursorMesh.position.copy(point);
             cursorMesh.material.color.set(isMouseDown ? 0xffff00 : 0xff0000);
             
-            if (isMouseDown) {
+            if (isMouseDown && !isInteractingWithGUI) {
                 sculpt(point);
             }
         } else {
